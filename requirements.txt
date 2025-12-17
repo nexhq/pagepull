@@ -1,0 +1,6 @@
+# Website Downloader Dependencies
+requests>=2.28.0
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+brotli>=1.0.0
+warcio>=1.7.4

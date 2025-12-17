@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/devkiraa/nex/main/registry/schema/nex-package.schema.json",
+  "id": "devkiraa.pagepull",
+  "name": "PagePull",
+  "version": "1.0.0",
+  "description": "Pull entire websites for offline viewing",
+  "type": "python",
+  "python": {
+    "version": ">=3.8",
+    "entry": "pagepull.py",
+    "requirements": "requirements.txt"
+  },
+  "run": {
+    "command": "python",
+    "args": ["pagepull.py"],
+    "passthrough_args": true
+  },
+  "author": {
+    "name": "devkiraa",
+    "github": "devkiraa"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/devkiraa/pagepull"
+}
