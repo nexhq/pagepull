@@ -1,21 +1,21 @@
-#!/usr/bin/env python3
 """
-PagePull - Full Website Offline Copy Tool
-==========================================
+PagePull - Web Recon & Mirror Tool
+==================================
 
-Pull entire websites for offline viewing with a single command.
-Handles Next.js, React, and other modern frameworks seamlessly.
+A versatile tool for offensive security assessment and website mirroring.
+- 🕷️  Mirror full websites for offline analysis
+- 🔍  Passive Recon: Extract comments, secrets, emails, and hidden endpoints
+- 📂  Asset Gathering: Pull JS/CSS for static analysis
 
 Install:
-    pip install requests beautifulsoup4 lxml brotli
+    pip install requests beautifulsoup4 lxml brotli colorama
 
 Usage:
-    pagepull -u https://example.com              Download a website
-    pagepull -u https://example.com --serve      Download and preview
-    pagepull -u https://example.com --stealth    Safe mode with delays
-    pagepull --only-serve -o my_site             Serve existing download
+    pagepull -u https://example.com --recon        Mirror & Scan for secrets
+    pagepull -u https://example.com --stealth      Red team safe mode
+    pagepull -u https://example.com --proxy ...    Route traffic through proxy
 
-Version: 1.0.0
+Version: 1.1.0 (Security Edition)
 """
 
 import os
@@ -86,6 +86,135 @@ ASSET_CATEGORY_MAP = {
 }
 
 VALID_ASSET_TYPES = sorted({k for k in ASSET_CATEGORY_MAP} | {'other'})
+
+
+# ============================================================================
+# RECON & SECURITY MODULE
+# ============================================================================
+
+class ReconScanner:
+    """Security scanner for passive reconnaissance"""
+    
+    def __init__(self):
+        self.findings = {
+            'secrets': [],
+            'emails': set(),
+            'comments': [],
+            'subdomains': set(),
+            'interesting_files': []
+        }
+        self.lock = Lock()
+        
+        # Regex Patterns
+        self.patterns = {
+            'aws_key': r'(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}',
+            'google_api': r'AIza[0-9A-Za-z\\-_]{35}',
+            'slack_token': r'xox[baprs]-([0-9a-zA-Z]{10,48})',
+            'private_key': r'-----BEGIN [A-Z ]+ PRIVATE KEY-----',
+            'generic_secret': r'(?i)(api[_-]?key|auth|secret|token|password|pwd)[\s=:"\']{0,5}[a-zA-Z0-9\-_]{20,}',
+            'email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+        }
+
+    def scan_content(self, url, content, content_type='text'):
+        """Scan text content for patterns"""
+        if not content:
+            return
+
+        # Ensure content is string
+        if isinstance(content, bytes):
+            try:
+                text = content.decode('utf-8', errors='ignore')
+            except:
+                return
+        else:
+            text = content
+
+        with self.lock:
+            # 1. Email Extraction
+            emails = re.findall(self.patterns['email'], text)
+            for email in emails:
+                if not any(x in email.lower() for x in ['.png', '.jpg', '.gif', '.svg', '.webp']): # Reduce false positives
+                    self.findings['emails'].add(email)
+
+            # 2. Secret Scanning
+            for p_name, pattern in self.patterns.items():
+                if p_name == 'email': continue
+                matches = re.finditer(pattern, text)
+                for match in matches:
+                    snippet = text[max(0, match.start()-20):min(len(text), match.end()+20)]
+                    self.findings['secrets'].append({
+                        'type': p_name,
+                        'value': match.group(0)[:5] + "..." + match.group(0)[-3:], # Redact for display
+                        'full_match': match.group(0),
+                        'snippet': snippet.strip(),
+                        'source': url
+                    })
+
+            # 3. Comment Extraction
+            if 'html' in content_type:
+                comments = re.findall(r'<!--(.*?)-->', text, re.DOTALL)
+                for comment in comments:
+                    clean_comment = comment.strip()
+                    if clean_comment and len(clean_comment) > 3:
+                        self.findings['comments'].append({
+                            'type': 'HTML',
+                            'content': clean_comment,
+                            'source': url
+                        })
+            elif 'javascript' in content_type or 'css' in content_type:
+                # Single line
+                js_comments = re.findall(r'//(.*?)\n', text)
+                # Multi line
+                js_multiline = re.findall(r'/\*(.*?)\*/', text, re.DOTALL)
+                
+                for c in js_comments + js_multiline:
+                    clean_c = c.strip()
+                    # Filter out common license/webpack noise
+                    if len(clean_c) > 5 and not any(x in clean_c.lower() for x in ['copyright', 'license', 'webpack', 'sourceMappingURL']):
+                        self.findings['comments'].append({
+                            'type': 'JS/CSS',
+                            'content': clean_c[:200] + ('...' if len(clean_c)>200 else ''),
+                            'source': url
+                        })
+
+    def generate_report(self, output_dir):
+        """Write recon report to disk"""
+        report_path = os.path.join(output_dir, '_recon_report.txt')
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write("🔒 PAGEPULL RECONNAISSANCE REPORT\n")
+            f.write("=================================\n\n")
+            
+            f.write(f"Generated: {datetime.now()}\n")
+            f.write(f"Total Secrets Found: {len(self.findings['secrets'])}\n")
+            f.write(f"Total Emails Found: {len(self.findings['emails'])}\n")
+            f.write(f"Total Comments Extracted: {len(self.findings['comments'])}\n\n")
+            
+            if self.findings['secrets']:
+                f.write("🚨 POTENTIAL SECRETS\n")
+                f.write("-" * 20 + "\n")
+                for secret in self.findings['secrets']:
+                    f.write(f"[!] Type: {secret['type']}\n")
+                    f.write(f"    Source: {secret['source']}\n")
+                    f.write(f"    Context: ...{secret['snippet']}...\n\n")
+            
+            if self.findings['emails']:
+                f.write("📧 EMAIL ADDRESSES\n")
+                f.write("-" * 20 + "\n")
+                for email in sorted(self.findings['emails']):
+                    f.write(f"  - {email}\n")
+                f.write("\n")
+                
+            if self.findings['comments']:
+                f.write("💬 INTERESTING COMMENTS\n")
+                f.write("-" * 20 + "\n")
+                # Show top 50 longest comments (likely more interesting)
+                sorted_comments = sorted(self.findings['comments'], key=lambda x: len(x['content']), reverse=True)[:50]
+                for c in sorted_comments:
+                    f.write(f"[{c['type']}] {c['source']}\n")
+                    f.write(f"  {c['content']}\n\n")
+
+        return report_path
 
 
 # ============================================================================
@@ -352,7 +481,7 @@ class WebsiteDownloader:
     def __init__(self, base_url, output_dir="downloaded_site", stealth_mode=False, 
                  respect_robots=True, base_delay=0.3, quiet=False, worker_count=None,
                  asset_filter=None, incremental=True, state_dir=None, export_formats=None,
-                 zip_name=None, warc_name=None):
+                 zip_name=None, warc_name=None, recon_mode=False):
         self.base_url = base_url.rstrip('/')
         self.domain = urlparse(base_url).netloc
         self.output_dir = output_dir
@@ -368,6 +497,10 @@ class WebsiteDownloader:
         self.quiet = quiet
         self.timeout = DEFAULT_CONFIG['timeout']
         self.worker_count = max(1, worker_count or DEFAULT_CONFIG['workers'])
+        
+        # Recon Module
+        self.recon_mode = recon_mode
+        self.scanner = ReconScanner() if recon_mode else None
         
         # Setup session
         self.session = requests.Session()
@@ -669,6 +802,10 @@ class WebsiteDownloader:
             if category != 'page' and not self.asset_filter.allows_size(len(content)):
                 return False, content_type, False
 
+            # RECON: Scan asset content
+            if self.scanner and category in ['js', 'css', 'doc', 'other']:
+                self.scanner.scan_content(url, content, content_type)
+
             self.create_directory(os.path.dirname(local_path))
             with open(local_path, 'wb') as f:
                 f.write(content)
@@ -895,6 +1032,10 @@ class WebsiteDownloader:
             
             # Parse and beautify HTML - use lxml for better handling
             soup = BeautifulSoup(response.content, 'lxml')
+            
+            # RECON: Scan HTML content
+            if self.scanner:
+                self.scanner.scan_content(url, response.content, 'text/html')
 
             asset_tasks = []
 
@@ -1114,6 +1255,8 @@ class WebsiteDownloader:
         mode_info = []
         if self.stealth_mode:
             mode_info.append("Stealth")
+        if self.recon_mode:
+            mode_info.append("Recon Scan")
         if self.respect_robots:
             mode_info.append("Robots.txt")
         if mode_info:
@@ -1220,6 +1363,19 @@ class WebsiteDownloader:
         # Create a summary file (silent)
         self.create_summary(skipped_urls)
         self.create_exports()
+        
+        # Generate Recon Report
+        if self.scanner and self.recon_mode:
+            report_path = self.scanner.generate_report(self.output_dir)
+            print()
+            print("┌" + "─" * 58 + "┐")
+            print("│" + " 🚨 Security Report Generated ".center(58) + "│")
+            print("├" + "─" * 58 + "┤")
+            print(f"│  📄 {os.path.basename(report_path):<52} │")
+            print(f"│  🔑 Secrets:  {len(self.scanner.findings['secrets']):<43} │")
+            print(f"│  📧 Emails:   {len(self.scanner.findings['emails']):<43} │")
+            print("└" + "─" * 58 + "┘")
+            
         self._save_state()
         if self.archive:
             self.archive.close()
@@ -1456,6 +1612,8 @@ Examples:
     # Safety options
     parser.add_argument('--stealth', action='store_true',
                         help='Stealth mode (random user-agent, longer delays)')
+    parser.add_argument('--recon', action='store_true',
+                        help='Enable passive reconnaissance scanner (secrets, emails, comments)')
     parser.add_argument('--no-robots', action='store_true',
                         help='Ignore robots.txt (not recommended)')
     
@@ -1546,7 +1704,8 @@ Examples:
             state_dir=state_dir,
             export_formats=export_formats,
             zip_name=args.zip_name,
-            warc_name=args.warc_name
+            warc_name=args.warc_name,
+            recon_mode=args.recon
         )
         downloader.download()
         create_sitemap(output_dir, downloader.visited_urls)

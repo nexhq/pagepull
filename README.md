@@ -61,8 +61,11 @@ python pagepull.py -u https://example.com
 # Download and preview in browser
 python pagepull.py -u https://example.com --serve
 
-# Stealth mode (safer, slower)
+# Stealth mode (safest for red teaming)
 python pagepull.py -u https://example.com --stealth
+
+# Recon mode (scan for secrets & PII)
+python pagepull.py -u https://example.com --recon
 
 # Custom output folder
 python pagepull.py -u https://example.com -o my_backup
@@ -88,7 +91,8 @@ python pagepull.py --only-serve -o my_backup
 ### Safety & Performance
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--stealth` | | Rotate UAs + random 1-3s delays |
+| `--recon` | | **Enable Security Scanner** (Finds keys, emails, comments) |
+| `--stealth` | | Rotate UAs + random 1-3s delays (Red Team mode) |
 | `--delay` | `-d` | Base delay between requests |
 | `--workers` | `-w` | Parallel asset workers (default: 4) |
 | `--no-robots` | | Ignore robots.txt (not recommended) |
@@ -134,6 +138,27 @@ python pagepull.py --only-serve -o my_backup
 - Runs keep a `.pagepull/state.json` manifest inside the output folder
 - Use `--fresh` to wipe everything before each run
 - Use `--no-incremental` when you always want a full re-download
+
+---
+
+## 🕵️ Security & Reconnaissance
+
+The **Security Edition** (v1.1) adds passive scanning capabilities for offensive security assessments:
+
+**1. Secret Scanning:**
+- Detects exposed API Keys (AWS, Google, Stripe, Slack, etc.)
+- Finds Private Keys and generic authentication tokens
+- Scans both HTML source and JS/CSS assets
+
+**2. Information Gathering:**
+- Extracts email addresses (PII)
+- Harvests comments (`<!-- ... -->`, `// ...`) which often contain sensitive info or endpoints
+- Generates a detailed `_recon_report.txt` in the output folder
+
+**Usage:**
+```bash
+python pagepull.py -u https://target.com --recon --stealth
+```
 
 ---
 
